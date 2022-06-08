@@ -14,12 +14,15 @@ from subprocess import CREATE_NO_WINDOW
 from win10toast import ToastNotifier
 from apscheduler.schedulers.background import BlockingScheduler
 
+BASE_PATH = os.path.expanduser('~')
+PATH = os.path.join(BASE_PATH, '.dooray')
+
 TOASTER = ToastNotifier()
 SERVICE = Service(ChromeDriverManager().install())
 SERVICE.creationflags = CREATE_NO_WINDOW
 
 AGENT = 'Mozilla/5.0 (Windows NT 4.0; WOW64) AppleWebKit/537.36 (KHTML, like Gecko) ' \
-                 'Chrome/37.0.2049.0 Safari/537.36'
+        'Chrome/37.0.2049.0 Safari/537.36'
 
 
 def show_toast(msg):
@@ -32,41 +35,57 @@ def show_toast(msg):
     )
 
 
-def load_setting():
-    base_path = os.path.expanduser('~')
-    path = os.path.join(base_path, '.dooray')
-    os.makedirs(path, exist_ok=True)
+def raise_error(msg=None, driver=None):
+    if driver is not None:
+        try:
+            driver.quit()
+        finally:
+            pass
 
-    def error():
-        os.startfile(path)
+    os.startfile(PATH)
+    if msg is None:
         show_toast('input ID, PW in info.json with notepad')
-        sys.exit(0)
+    else:
+        show_toast(msg)
+    sys.exit(1)
 
-    if 'info.json' not in os.listdir(path):
+
+def load_setting():
+    os.makedirs(PATH, exist_ok=True)
+
+    if 'info.json' not in os.listdir(PATH):
         json.dump({
             'ID': '',
             'PW': '',
-            'domain': 'agilegrowth',
+            'domain': '',
             'WorkingTime(hours)': 9,
             'UpdateTime(minutes)': 10
-        }, open(os.path.join(path, 'info.json'), 'w'), indent=4)
-        error()
+        }, open(os.path.join(PATH, 'info.json'), 'w'), indent=4)
+        raise_error()
 
-    info = json.load(open(os.path.join(path, 'info.json')))
+    info = json.load(open(os.path.join(PATH, 'info.json')))
     ID, PW, domain, working_time, update_time = \
         map(info.get, ['ID', 'PW', 'domain', 'WorkingTime(hours)', 'UpdateTime(minutes)'])
     if ID == '' or PW == '' or domain == '':
-        error()
+        raise_error()
 
     return ID, PW, domain, working_time, update_time
 
 
-def main(ID, PW, domain, working_time):
+def init_driver():
     options = webdriver.ChromeOptions()
     options.add_argument(f'user-agent={AGENT}')
+    options.add_argument('disable-gpu')
+    options.add_argument('disable-infobars')
+    options.add_argument('--disable-extensions')
     options.add_argument('headless')
     driver = webdriver.Chrome(service=SERVICE, options=options)
     driver.set_window_size(1920, 1080)
+    return driver
+
+
+def main(ID, PW, domain, working_time):
+    driver = init_driver()
     driver.get('https://dooray.com/orgs')
     sleep(1)
 
@@ -76,8 +95,7 @@ def main(ID, PW, domain, working_time):
 
     elem = driver.find_element(By.CLASS_NAME, 'btn.btn-primary.btn-lg.next-btn')
     if elem.get_attribute('disabled') == 'true':
-        show_toast('일치하는 도메인 정보 없음')
-        driver.quit()
+        raise_error('일치하는 도메인 정보 없음', driver)
     elem.click()
 
     elem_id, elem_pw = driver.find_elements(By.CLASS_NAME, 'input-box > input')
@@ -85,6 +103,7 @@ def main(ID, PW, domain, working_time):
     elem_id.send_keys(ID)
     elem_pw.send_keys(PW)
     elem_pw.send_keys(Keys.ENTER)
+    # TODO: Authentication Error
     sleep(2)
 
     driver.find_element(By.CLASS_NAME, 'icon-gnb-menu').click()
@@ -117,6 +136,8 @@ def main(ID, PW, domain, working_time):
         show_toast('퇴근성공')
         driver.quit()
         sys.exit(0)
+
+    driver.quit()
 
 
 if __name__ == '__main__':
