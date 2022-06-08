@@ -47,7 +47,7 @@ def raise_error(msg=None, driver=None):
         show_toast('input ID, PW in info.json with notepad')
     else:
         show_toast(msg)
-    sys.exit(1)
+    sys.exit(0)
 
 
 def load_setting():
