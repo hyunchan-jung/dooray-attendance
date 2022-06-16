@@ -1,7 +1,7 @@
 import os
 import sys
 import json
-from datetime import datetime
+from datetime import datetime, timedelta
 from time import sleep
 
 from selenium import webdriver
@@ -11,11 +11,11 @@ from selenium.webdriver.chrome.service import Service
 from webdriver_manager.chrome import ChromeDriverManager
 from subprocess import CREATE_NO_WINDOW
 
-from win10toast import ToastNotifier
+from win10toast_click import ToastNotifier
 from apscheduler.schedulers.background import BlockingScheduler
 
-BASE_PATH = os.path.expanduser('~')
-PATH = os.path.join(BASE_PATH, '.dooray')
+USER_PATH = os.path.expanduser('~')
+PATH = os.path.join(USER_PATH, '.dooray')
 
 TOASTER = ToastNotifier()
 SERVICE = Service(ChromeDriverManager().install())
@@ -25,13 +25,14 @@ AGENT = 'Mozilla/5.0 (Windows NT 4.0; WOW64) AppleWebKit/537.36 (KHTML, like Gec
         'Chrome/37.0.2049.0 Safari/537.36'
 
 
-def show_toast(msg):
+def show_toast(msg, callback_func=None):
     TOASTER.show_toast(
-        title='dooray',
+        title='dooray_attendance',
         msg=msg,
         icon_path='',
-        duration=5,
-        threaded=True
+        duration=3,
+        threaded=True,
+        callback_on_click=callback_func
     )
 
 
@@ -44,7 +45,7 @@ def raise_error(msg=None, driver=None):
 
     os.startfile(PATH)
     if msg is None:
-        show_toast('input ID, PW in info.json with notepad')
+        show_toast('Input ID, PW in settings.json with notepad')
     else:
         show_toast(msg)
     sys.exit(0)
@@ -53,23 +54,21 @@ def raise_error(msg=None, driver=None):
 def load_setting():
     os.makedirs(PATH, exist_ok=True)
 
-    if 'info.json' not in os.listdir(PATH):
+    if 'settings.json' not in os.listdir(PATH):
         json.dump({
             'ID': '',
             'PW': '',
             'domain': '',
             'WorkingTime(hours)': 9,
-            'UpdateTime(minutes)': 10
-        }, open(os.path.join(PATH, 'info.json'), 'w'), indent=4)
+        }, open(os.path.join(PATH, 'settings.json'), 'w'), indent=4)
         raise_error()
 
-    info = json.load(open(os.path.join(PATH, 'info.json')))
-    ID, PW, domain, working_time, update_time = \
-        map(info.get, ['ID', 'PW', 'domain', 'WorkingTime(hours)', 'UpdateTime(minutes)'])
-    if ID == '' or PW == '' or domain == '':
+    info = json.load(open(os.path.join(PATH, 'settings.json')))
+    ID, PW, domain, working_time = map(info.get, ['ID', 'PW', 'domain', 'WorkingTime(hours)'])
+    if '' in [ID, PW, domain, working_time]:
         raise_error()
 
-    return ID, PW, domain, working_time, update_time
+    return ID, PW, domain, working_time
 
 
 def init_driver():
@@ -84,8 +83,7 @@ def init_driver():
     return driver
 
 
-def main(ID, PW, domain, working_time):
-    driver = init_driver()
+def go_attendance_page(driver):
     driver.get('https://dooray.com/orgs')
     sleep(1)
 
@@ -109,42 +107,61 @@ def main(ID, PW, domain, working_time):
     driver.find_element(By.CLASS_NAME, 'icon-gnb-menu').click()
     driver.find_element(By.CLASS_NAME, 'icon-service-icon-manage-work-schedule').click()
     sleep(2)
+    return driver
 
-    year, month, day = map(int, driver.find_element(By.CLASS_NAME, 'current__date').text.split('.')[:-1])
 
-    start_at, end_at = map(lambda x: x.text, driver.find_elements(By.CLASS_NAME, 'check-time'))
-    is_start, is_end = map(lambda x: x != '-', [start_at, end_at])
-
-    if not is_start:
-        show_toast('출근안함')
-        driver.quit()
-    elif is_end:
-        show_toast('이미퇴근함')
-        driver.quit()
-        sys.exit(0)
-
-    def get_time(str_time):
-        hour, minute, second = map(int, str_time.split(':'))
-        timedelta = datetime(year=year, month=month, day=day, hour=hour, minute=minute, second=second)
-        return timedelta
-
-    time_diff = (datetime.now() - get_time(start_at)).total_seconds() / 3600
-
-    if time_diff >= working_time:
-        driver.find_elements(By.CLASS_NAME, 'check-button.eZWsHA.m.primary')[1].click()
-        sleep(1)
-        show_toast('퇴근성공')
-        driver.quit()
-        sys.exit(0)
-
+def start_attendance(driver):
+    # TODO: run attendance
     driver.quit()
 
 
-if __name__ == '__main__':
-    ID, PW, domain, working_time, update_time = load_setting()
+def end_attendance():
+    driver = init_driver()
+    driver = go_attendance_page(driver)
 
-    main(ID, PW, domain, working_time)
+    end_at = driver.find_elements(By.CLASS_NAME, 'check-time')[1].text
+    if end_at != '-':
+        show_toast('이미 퇴근')
+        driver.quit()
+        sys.exit(0)
+
+    # driver.find_elements(By.CLASS_NAME, 'check-button.eZWsHA.m.primary')[1].click()
+    sleep(1)
+    show_toast('퇴근 성공')
+    driver.quit()
+    sys.exit(0)
+
+
+def get_attendance_time():
+    driver = init_driver()
+    driver = go_attendance_page(driver)
+
+    if driver.find_elements(By.CLASS_NAME, 'check-time')[0].text == '-':
+        show_toast('클릭해서 출근', lambda: start_attendance(driver))
+        sleep(2)
+        driver.quit()
+        return
+
+    year, month, day = map(int, driver.find_element(By.CLASS_NAME, 'current__date').text.split('.')[:-1])
+    hour, minute, second = map(int, driver.find_elements(By.CLASS_NAME, 'check-time')[0].text.split(':'))
+    attendance_time = datetime(year=year, month=month, day=day, hour=hour, minute=minute, second=second)
+
+    driver.quit()
+
+    return attendance_time
+
+
+if __name__ == '__main__':
+    ID, PW, domain, working_time = load_setting()
+
+    while True:
+        attendance_time = get_attendance_time()
+        if attendance_time is not None:
+            attendance_end_time = attendance_time + timedelta(hours=working_time, minutes=1)
+            show_toast(f'퇴근시간: {attendance_end_time}')
+            break
+        sleep(120)
 
     scheduler = BlockingScheduler(timezone='Asia/Seoul')
-    scheduler.add_job(main, 'interval', minutes=update_time, id='job', args=[ID, PW, domain, working_time])
+    scheduler.add_job(end_attendance, 'date', run_date=attendance_end_time)
     scheduler.start()
