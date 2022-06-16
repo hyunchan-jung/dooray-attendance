@@ -125,7 +125,7 @@ def end_attendance():
         driver.quit()
         sys.exit(0)
 
-    # driver.find_elements(By.CLASS_NAME, 'check-button.eZWsHA.m.primary')[1].click()
+    driver.find_elements(By.CLASS_NAME, 'check-button.eZWsHA.m.primary')[1].click()
     sleep(1)
     show_toast('퇴근 성공')
     driver.quit()
