@@ -1,167 +1,73 @@
-import os
-import sys
-import json
-from datetime import datetime, timedelta
-from time import sleep
+# build script : pyinstaller main.py --onefile --name dooray-attendance --noconsole --add-data "utils;images" --icon=images/dooray.ico --clean
 
-from selenium import webdriver
-from selenium.webdriver.common.by import By
-from selenium.webdriver.common.keys import Keys
-from selenium.webdriver.chrome.service import Service
-from webdriver_manager.chrome import ChromeDriverManager
-from subprocess import CREATE_NO_WINDOW
+from utils import *
 
-from win10toast_click import ToastNotifier
-from apscheduler.schedulers.background import BlockingScheduler
+import rcc
+from PyQt5.QtWidgets import QApplication, QMenu, QSystemTrayIcon, QAction, QStyle
+from PyQt5.QtGui import QIcon
+from apscheduler.schedulers.background import BackgroundScheduler
 
-USER_PATH = os.path.expanduser('~')
-PATH = os.path.join(USER_PATH, '.dooray')
-
-TOASTER = ToastNotifier()
-SERVICE = Service(ChromeDriverManager().install())
-SERVICE.creationflags = CREATE_NO_WINDOW
-
-AGENT = 'Mozilla/5.0 (Windows NT 4.0; WOW64) AppleWebKit/537.36 (KHTML, like Gecko) ' \
-        'Chrome/37.0.2049.0 Safari/537.36'
+ICON = [':/images/0.ico', ':/images/1.ico', ':/images/2.ico']
+TEST_ICON = ['images/0.ico', 'images/1.ico', 'images/2.ico']
 
 
-def show_toast(msg, callback_func=None):
-    TOASTER.show_toast(
-        title='dooray_attendance',
-        msg=msg,
-        icon_path='',
-        duration=3,
-        threaded=True,
-        callback_on_click=callback_func
-    )
+class Application:
+    def __init__(self, mode=None):
+        self.settings = Settings()
+        self.auth_info = {
+            'id': self.settings.id,
+            'pw': self.settings.pw,
+            'domain': self.settings.domain
+        }
+        self.icon_set = TEST_ICON if mode == 'test' else ICON
+        self.scheduler = BackgroundScheduler(timezone='Asia/Seoul')
+        self.scheduler.start()
 
+        self.app = QApplication(sys.argv)
+        self.tray = QSystemTrayIcon(self.app)
+        self.menu = QMenu()
 
-def raise_error(msg=None, driver=None):
-    if driver is not None:
-        try:
-            driver.quit()
-        finally:
-            pass
+        self.quit_action = QAction('Exit', self.app)
+        self.quit_action.triggered.connect(self.app.quit)
+        self.menu.addAction(self.quit_action)
 
-    os.startfile(PATH)
-    if msg is None:
-        show_toast('Input ID, PW in settings.json with notepad')
-    else:
-        show_toast(msg)
-    sys.exit(0)
+        self.tray.setContextMenu(self.menu)
+        self.tray.setIcon(QIcon(self.icon_set[0]))
+        self.set_tooltip('-', '-')
+        self.tray.show()
 
+        self.check_attendance()
+        self.scheduler.add_job(self.check_attendance, 'interval', minutes=20)
 
-def load_setting():
-    os.makedirs(PATH, exist_ok=True)
+    def check_attendance(self):
+        attendance_time = get_attendance_time(self.auth_info)
+        if attendance_time[0] != '-':
+            if attendance_time[1] == '-':
+                # TODO: 퇴근 스케줄러 실행(attendance_time[0] + timedelta(hours=self.settings.working_time))
+                self.tray.setIcon(QIcon(self.icon_set[1]))
+                self.set_tooltip(attendance_time[0], attendance_time[1])
+            else:
+                self.tray.setIcon(QIcon(self.icon_set[2]))
+                self.set_tooltip(attendance_time[0], attendance_time[1])
+                # TODO: 날짜 변경여부 체크 스케줄러 실행
+        else:
+            # TODO: 아직 출근 안했을 때
+            self.tray.setIcon(QIcon(self.icon_set[0]))
+            self.set_tooltip(attendance_time[0], attendance_time[1])
 
-    if 'settings.json' not in os.listdir(PATH):
-        json.dump({
-            'ID': '',
-            'PW': '',
-            'domain': '',
-            'WorkingTime(hours)': 9,
-        }, open(os.path.join(PATH, 'settings.json'), 'w'), indent=4)
-        raise_error()
+    def set_tooltip(self, t_start=None, t_end=None):
+        t_start = t_start.strftime('%H:%M:%S') if isinstance(t_start, datetime) else t_start
+        t_end = t_end.strftime('%H:%M:%S') if isinstance(t_end, datetime) else t_end
+        self.tray.setToolTip(f'출근: {t_start}\n퇴근: {t_end}')
 
-    info = json.load(open(os.path.join(PATH, 'settings.json')))
-    ID, PW, domain, working_time = map(info.get, ['ID', 'PW', 'domain', 'WorkingTime(hours)'])
-    if '' in [ID, PW, domain, working_time]:
-        raise_error()
-
-    return ID, PW, domain, working_time
-
-
-def init_driver():
-    options = webdriver.ChromeOptions()
-    options.add_argument(f'user-agent={AGENT}')
-    options.add_argument('disable-gpu')
-    options.add_argument('disable-infobars')
-    options.add_argument('--disable-extensions')
-    options.add_argument('headless')
-    driver = webdriver.Chrome(service=SERVICE, options=options)
-    driver.set_window_size(1920, 1080)
-    return driver
-
-
-def go_attendance_page(driver):
-    driver.get('https://dooray.com/orgs')
-    sleep(1)
-
-    elem = driver.find_element(By.ID, 'subdomain')
-    elem.send_keys(domain)
-    sleep(1)
-
-    elem = driver.find_element(By.CLASS_NAME, 'btn.btn-primary.btn-lg.next-btn')
-    if elem.get_attribute('disabled') == 'true':
-        raise_error('일치하는 도메인 정보 없음', driver)
-    elem.click()
-
-    elem_id, elem_pw = driver.find_elements(By.CLASS_NAME, 'input-box > input')
-
-    elem_id.send_keys(ID)
-    elem_pw.send_keys(PW)
-    elem_pw.send_keys(Keys.ENTER)
-    # TODO: Authentication Error
-    sleep(2)
-
-    driver.find_element(By.CLASS_NAME, 'icon-gnb-menu').click()
-    driver.find_element(By.CLASS_NAME, 'icon-service-icon-manage-work-schedule').click()
-    sleep(2)
-    return driver
-
-
-def start_attendance(driver):
-    # TODO: run attendance
-    driver.quit()
-
-
-def end_attendance():
-    driver = init_driver()
-    driver = go_attendance_page(driver)
-
-    end_at = driver.find_elements(By.CLASS_NAME, 'check-time')[1].text
-    if end_at != '-':
-        show_toast('이미 퇴근')
-        driver.quit()
-        sys.exit(0)
-
-    driver.find_elements(By.CLASS_NAME, 'check-button.eZWsHA.m.primary')[1].click()
-    sleep(1)
-    show_toast('퇴근 성공')
-    driver.quit()
-    sys.exit(0)
-
-
-def get_attendance_time():
-    driver = init_driver()
-    driver = go_attendance_page(driver)
-
-    if driver.find_elements(By.CLASS_NAME, 'check-time')[0].text == '-':
-        show_toast('클릭해서 출근', lambda: start_attendance(driver))
-        sleep(2)
-        driver.quit()
-        return
-
-    year, month, day = map(int, driver.find_element(By.CLASS_NAME, 'current__date').text.split('.')[:-1])
-    hour, minute, second = map(int, driver.find_elements(By.CLASS_NAME, 'check-time')[0].text.split(':'))
-    attendance_time = datetime(year=year, month=month, day=day, hour=hour, minute=minute, second=second)
-
-    driver.quit()
-
-    return attendance_time
+    def exec(self):
+        self.app.exec()
 
 
 if __name__ == '__main__':
-    ID, PW, domain, working_time = load_setting()
+    if len(sys.argv) > 1 and sys.argv[1] == 'test':
+        app = Application(mode='test')
+    else:
+        app = Application()
 
-    while True:
-        attendance_time = get_attendance_time()
-        if attendance_time is not None:
-            attendance_end_time = attendance_time + timedelta(hours=working_time, minutes=1)
-            show_toast(f'퇴근시간: {attendance_end_time}')
-            break
-        sleep(120)
-
-    scheduler = BlockingScheduler(timezone='Asia/Seoul')
-    scheduler.add_job(end_attendance, 'date', run_date=attendance_end_time)
-    scheduler.start()
+    sys.exit(app.exec())

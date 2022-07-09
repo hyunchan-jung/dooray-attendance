@@ -1,5 +1,7 @@
-selenium==4.2.0
+selenium==4.3.0
 webdriver-manager==3.7.0
+PyQt5==5.15.7
+PyQt5-stubs==5.15.6.0
 pyinstaller==5.1
 win10toast-click==0.1.2
 apscheduler==3.9.1
