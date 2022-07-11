@@ -1,24 +1,54 @@
 from utils import *
 
+import os
 import sys
+import requests
 from time import sleep
 from datetime import datetime, timedelta
+from zipfile import ZipFile
 
 from selenium import webdriver
 from selenium.webdriver.common.by import By
 from selenium.webdriver.common.keys import Keys
 from selenium.webdriver.chrome.service import Service
-from webdriver_manager.chrome import ChromeDriverManager
 from subprocess import CREATE_NO_WINDOW
 
-SERVICE = Service(ChromeDriverManager().install())
+USER_PATH = os.path.expanduser('~')
+PATH = os.path.join(USER_PATH, '.dooray')
+
+CHROMIUM_PATH = os.path.join(PATH, 'chrome-win/chrome.exe')
+DRIVER_PATH = os.path.join(PATH, 'chromedriver_win32/chromedriver.exe')
+
+SERVICE = Service(executable_path=DRIVER_PATH)
 SERVICE.creationflags = CREATE_NO_WINDOW
 AGENT = 'Mozilla/5.0 (Windows NT 4.0; WOW64) AppleWebKit/537.36 (KHTML, like Gecko) ' \
         'Chrome/37.0.2049.0 Safari/537.36'
 
 
+def download_browser_and_driver():
+    base_url = 'https://www.googleapis.com/download/storage/v1/b/chromium-browser-snapshots/o/Win_x64%2F1000027%2F'
+    chromium_zip = 'chrome-win.zip'
+    driver_zip = 'chromedriver_win32.zip'
+    chromium_url = base_url + f'{chromium_zip}?alt=media'
+    driver_url = base_url + f'{driver_zip}?alt=media'
+
+    def download_file(url, file):
+        res = requests.get(url)
+        download_fp = os.path.join(PATH, file)
+        with open(download_fp, 'wb') as f:
+            f.write(res.content)
+        ZipFile(download_fp).extractall(PATH)
+        os.remove(download_fp)
+
+    if not os.path.exists(CHROMIUM_PATH):
+        download_file(chromium_url, chromium_zip)
+    if not os.path.exists(DRIVER_PATH):
+        download_file(driver_url, driver_zip)
+
+
 def init_driver():
     options = webdriver.ChromeOptions()
+    options.binary_location = CHROMIUM_PATH
     options.add_argument(f'user-agent={AGENT}')
     options.add_argument('disable-gpu')
     options.add_argument('disable-infobars')
@@ -95,3 +125,6 @@ def end_attendance():
     show_toast('퇴근 성공')
     driver.quit()
     sys.exit(0)
+
+
+download_browser_and_driver()

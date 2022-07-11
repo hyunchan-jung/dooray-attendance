@@ -1,4 +1,4 @@
-# build script : pyinstaller main.py --onefile --name dooray-attendance --noconsole --add-data "utils;images" --icon=images/dooray.ico --clean
+# build script : pyinstaller main.py --onefile --name dooray-attendance --noconsole --add-data "utils;images" --icon=dooray.ico --clean
 
 from utils import *
 
