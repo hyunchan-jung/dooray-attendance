@@ -80,6 +80,11 @@ def move_attendance_page(driver, auth_info):
     # TODO: Authentication Error
     sleep(2)
 
+    renewal_modal = driver.find_elements(By.CLASS_NAME, 'renewal-preview-modal-close')
+    if len(renewal_modal) > 0:
+        renewal_modal.click()
+        sleep(1)
+
     driver.find_element(By.CLASS_NAME, 'icon-gnb-menu').click()
     driver.find_element(By.CLASS_NAME, 'icon-service-icon-manage-work-schedule').click()
     sleep(2)
